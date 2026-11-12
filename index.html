@@ -1,8 +1,58 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#f7f8fa"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon.png"><link rel="stylesheet" href="style.css"><title>Альфред Сканер</title></head><body>
-<header><div class="brand"><div class="mark">A</div><div><b>Альфред Сканер</b><small>Мои документы</small></div></div><button id="settings" class="iconbtn" aria-label="Информация">ⓘ</button></header>
-<main><section id="libraryView"><div class="topline"><h1>Документы</h1><button id="newFolder" class="subtle">＋ Папка</button></div><div class="searchbox">⌕ <input id="search" placeholder="Поиск по документам" autocomplete="off"></div><div id="folderBar" class="folderbar"></div><div class="sectionhead"><b id="folderTitle">Все документы</b><span id="docCount"></span></div><div id="documents" class="documents"></div><div id="emptyLibrary" class="empty"><div class="emptyIcon">▤</div><b>Пока нет документов</b><p>Отсканируйте лист или выберите фотографии. Готовые PDF появятся здесь.</p></div></section>
-<section id="batchView" class="hidden"><div class="topline"><button id="backLibrary" class="subtle">‹ Назад</button><h2>Новый документ</h2><button id="clearBatch" class="subtle danger">Очистить</button></div><input id="filename" value="Новый документ" aria-label="Название документа" class="nameinput"><div id="batchPages" class="pagegrid"></div><div id="batchEmpty" class="empty compact">Добавьте страницы с камеры или из галереи</div><div class="batchActions"><button id="addCamera" class="outline">📷 Камера</button><button id="addPhotos" class="outline">＋ Фото</button></div><button id="saveDocument" class="primary wide" disabled>Сохранить PDF</button><p class="hint">Документ сохранится на iPhone в библиотеке приложения. Для надёжной резервной копии экспортируйте PDF в «Файлы».</p></section>
-<section id="editorView" class="hidden"><div class="topline"><button id="cancelEdit" class="subtle">‹ Назад</button><h2>Границы листа</h2><button id="autoDetect" class="subtle">Авто</button></div><p class="hint" id="detectStatus">Перемещайте точки точно по углам бумаги. Удерживайте точку для увеличения.</p><div id="cropBox"><canvas id="cropCanvas"></canvas><svg id="cropOverlay" viewBox="0 0 1000 1000" preserveAspectRatio="none"><polygon id="cropPolygon" points=""/></svg><div id="cropHandles"></div><div id="magnifier" class="hidden"><canvas id="magCanvas" width="156" height="156"></canvas><div class="crosshair">＋</div></div></div><div class="filterbar"><button data-filter="original" class="selected">Оригинал</button><button data-filter="enhance">Документ</button><button data-filter="gray">Серый</button><button data-filter="bw">Ч/Б</button></div><div class="batchActions"><button id="rotate" class="outline">↻ Повернуть</button><button id="resetEdit" class="outline">↺ Сбросить</button></div><button id="applyEdit" class="primary wide">Выровнять и сохранить</button></section></main>
-<nav><button id="navDocs" class="active">▤<span>Документы</span></button><button id="navScan" class="scanbutton" aria-label="Сканировать">＋</button><button id="navImport">▧<span>Галерея</span></button></nav>
-<input id="cameraInput" type="file" accept="image/*" capture="environment" multiple hidden><input id="photoInput" type="file" accept="image/*" multiple hidden>
-<div id="sheet" class="hidden"><div class="sheetCard"><div id="sheetContent"></div><button id="sheetClose" class="outline wide">Закрыть</button></div></div><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#f7f9fc"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="description" content="Приватный сканер документов — все файлы остаются на устройстве"/>
+<link rel="manifest" href="manifest.webmanifest?v=3"/><link rel="apple-touch-icon" href="icon.png"/><link rel="stylesheet" href="style.css?v=3"/><title>Альфред Сканер</title></head>
+<body>
+<header class="app-header"><div class="brand"><span class="logo">A</span><div><strong>Альфред Сканер</strong><small>Сканер и библиотека PDF</small></div></div><button id="infoButton" class="round-icon" aria-label="Информация">ⓘ</button></header>
+<main>
+<section id="libraryView" class="view">
+  <div class="heading"><div><h1>Мои документы</h1><p class="sub">Сканирование и хранение на iPhone</p></div><button id="createFolder" class="text-action">+ Группа</button></div>
+  <label class="search">⌕ <input id="searchInput" placeholder="Название документа или группы" autocomplete="off"/></label>
+  <div class="section-label"><b>Группы</b><span id="folderCount"></span></div>
+  <div class="folders" id="folderList"></div>
+  <div class="section-label docs-head"><b id="currentFolderTitle">Все документы</b><span id="documentCount">0 PDF</span></div>
+  <div id="draftNotice" class="draft-banner hidden"><div><b>Неоконченный документ</b><span id="draftCount"></span></div><button id="resumeDraft" class="small-primary">Продолжить</button></div>
+  <div id="documentList" class="documents"></div>
+  <div id="emptyLibrary" class="empty"><div class="empty-symbol">▤</div><strong>Здесь будут документы</strong><p>Нажмите «+», отсканируйте несколько листов и сохраните их как один PDF.</p></div>
+</section>
+<section id="batchView" class="view hidden">
+  <div class="bar"><button id="batchBack" class="back" aria-label="К документам">‹ Документы</button><span class="bar-title">Сканирование</span><button id="discardDraft" class="text-action danger">Удалить</button></div>
+  <div class="draft-intro"><label class="field-label" for="docName">Название документа</label><input id="docName" class="namefield" placeholder="Например, Доверенность" autocomplete="off"/>
+  <label class="field-label" for="docFolder">Группа</label><select id="docFolder" class="namefield"></select></div>
+  <div class="section-label"><b>Страницы</b><span id="batchCounter">0</span></div>
+  <div id="batchHint" class="tip">Снимайте страницы подряд. Сохранять каждую отдельно не требуется.</div>
+  <div id="pageGrid" class="page-grid"></div>
+  <div id="emptyBatch" class="empty compact"><div class="empty-symbol">▧</div><strong>Начните со съёмки</strong><p>Сначала добавьте первую страницу. Далее можно сразу снимать следующую.</p></div>
+  <div class="batch-buttons"><button id="batchCamera" class="primary">◎ Снять следующую</button><button id="batchGallery" class="outline">▧ Из галереи</button></div>
+  <button id="finishDocument" class="save-button" disabled>Готово · Сохранить PDF</button>
+  <p class="footnote">Черновик сохраняется на устройстве автоматически. После создания PDF рекомендуем сохранить копию в «Файлы».</p>
+</section>
+<section id="cameraView" class="view hidden camera-view">
+  <div class="bar"><button id="cameraBack" class="back">‹ К страницам</button><span class="bar-title">Пакетная съёмка</span><span id="liveCounter" class="camera-counter">0 стр.</span></div>
+  <div class="live-stage"><video id="liveVideo" autoplay muted playsinline></video><div id="cameraError" class="camera-error hidden">Камера не открылась. Используйте системную камеру iPhone.</div><div id="captureFlash" class="camera-flash hidden">Снимок добавлен ✓</div></div>
+  <p class="camera-instructions" id="cameraInstructions">Поместите лист целиком в кадр. После каждого снимка можно сразу снимать следующую страницу.</p>
+  <div class="camera-controls"><button id="nativeCamera" class="outline">Системная камера</button><button id="liveShutter" class="shutter" aria-label="Сфотографировать"><span></span></button><button id="cameraDone" class="outline">Готово</button></div>
+</section>
+<section id="editorView" class="view hidden">
+  <div class="bar"><button id="editBack" class="back">‹ Назад</button><span class="bar-title">Границы листа</span><button id="redetect" class="text-action">Авто</button></div>
+  <p id="detectStatus" class="detect-hint">Проверка границ…</p>
+  <div id="cropBox"><canvas id="sourceCanvas"></canvas><svg id="cropOverlay" viewBox="0 0 1000 1000" preserveAspectRatio="none"><polygon id="cropPolygon" points=""/></svg><div id="handles"></div><div id="lens" class="hidden"><canvas id="lensCanvas" width="170" height="170"></canvas><span class="lens-crosshair"></span></div></div>
+  <div class="filter-title">Фильтр</div><div class="filter-tabs" id="filterList"><button data-filter="document" class="selected">Документ</button><button data-filter="original">Оригинал</button><button data-filter="gray">Серый</button><button data-filter="bw">Ч/Б</button></div>
+  <div class="edit-tools"><button id="rotateImage" class="outline">↻ Повернуть</button><button id="resetImage" class="outline">Сбросить</button></div>
+  <button id="applyCrop" class="save-button">✓ Применить</button>
+  <button id="applyAndCamera" class="secondary-action">Применить и снять следующую →</button>
+</section>
+<section id="detailView" class="view hidden">
+  <div class="bar"><button id="detailBack" class="back">‹ Документы</button><span class="bar-title">Документ</span><button id="detailMenu" class="text-action">•••</button></div>
+  <h2 id="detailTitle" class="detail-title"></h2><p id="detailMeta" class="sub"></p>
+  <div class="section-label"><b>Страницы</b><span id="detailCount"></span></div><div id="detailPages" class="page-grid"></div>
+  <div class="batch-buttons"><button id="addToSaved" class="outline">+ Добавить страницы</button><button id="exportSaved" class="primary">Поделиться PDF</button></div>
+  <p class="footnote">Открывайте и сохраняйте копию PDF в приложении «Файлы». Локальную библиотеку Safari можно потерять при очистке данных сайта.</p>
+</section>
+</main>
+<nav id="bottomNav"><button id="navDocuments" class="active"><span class="nav-symbol">▤</span><span>Документы</span></button><button id="navCapture" class="nav-plus" aria-label="Новый скан">+</button><button id="navPhotos"><span class="nav-symbol">▧</span><span>Фото</span></button></nav>
+<input id="cameraInput" type="file" accept="image/*" capture="environment" hidden/><input id="galleryInput" type="file" accept="image/*" multiple hidden/>
+<div id="sheet" class="overlay hidden" role="dialog" aria-modal="true"><div class="sheet"><div class="sheet-grab"></div><h3 id="sheetTitle"></h3><div id="sheetActions"></div><button id="sheetClose" class="sheet-cancel">Отмена</button></div></div>
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="detector.js?v=3"></script><script src="pdf.js?v=3"></script><script src="app.js?v=3"></script></body></html>

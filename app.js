@@ -1,48 +1,182 @@
 'use strict';
-const $=id=>document.getElementById(id), MAX=2400;let pages=[],editing=-1,source=null,original=null,corners=[],filter='original',folder='all',docs=[],folders=[],db=null,dragging=-1;
-const show=id=>{for(const x of ['libraryView','batchView','editorView'])$(x).classList.toggle('hidden',x!==id);};
-const cv=(w,h)=>{let c=document.createElement('canvas');c.width=w;c.height=h;return c};
-const clone=c=>{const o=cv(c.width,c.height);o.getContext('2d').drawImage(c,0,0);return o};
-const clamp=x=>Math.max(0,Math.min(1,x));
-function openDB(){return new Promise((resolve,reject)=>{let r=indexedDB.open('alfred_scanner_2',1);r.onupgradeneeded=()=>{let d=r.result;d.createObjectStore('docs',{keyPath:'id'});d.createObjectStore('folders',{keyPath:'id'})};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
-function getAll(store){return new Promise((res,rej)=>{let r=db.transaction(store).objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-function put(store,value){return new Promise((res,rej)=>{let r=db.transaction(store,'readwrite').objectStore(store).put(value);r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}
-function del(store,id){return new Promise((res,rej)=>{let r=db.transaction(store,'readwrite').objectStore(store).delete(id);r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}
-async function refresh(){docs=await getAll('docs');folders=await getAll('folders');renderLibrary()}
-function renderLibrary(){let bar=$('folderBar');bar.replaceChildren();for(const f of [{id:'all',name:'Все'},...folders]){let b=document.createElement('button');b.className='folderchip'+(folder===f.id?' active':'');b.textContent=(f.id==='all'?'▤ ':'▰ ')+f.name;b.onclick=()=>{folder=f.id;renderLibrary()};bar.append(b)}let q=$('search').value.trim().toLowerCase();let list=docs.filter(d=>(folder==='all'||d.folder===folder)&&d.name.toLowerCase().includes(q)).sort((a,b)=>b.created-a.created);$('folderTitle').textContent=folder==='all'?'Все документы':folders.find(f=>f.id===folder)?.name||'Документы';$('docCount').textContent=list.length+' PDF';$('emptyLibrary').classList.toggle('hidden',!!list.length);let root=$('documents');root.replaceChildren();for(const d of list){let card=document.createElement('div');card.className='doc';let icon=document.createElement('div');icon.className='docIcon';icon.textContent='▤';let body=document.createElement('div');body.className='docBody';let title=document.createElement('b');title.textContent=d.name;let sub=document.createElement('small');sub.textContent=`${d.count} стр. · ${new Date(d.created).toLocaleDateString('ru-RU')} · ${Math.round(d.blob.size/1024)} КБ`;body.append(title,sub);card.onclick=()=>exportDoc(d);let more=document.createElement('button');more.className='docMore';more.textContent='⋯';more.onclick=e=>{e.stopPropagation();docMenu(d)};card.append(icon,body,more);root.append(card)}}
-function sheet(title,actions){let root=$('sheetContent');root.replaceChildren();let h=document.createElement('h3');h.textContent=title;root.append(h);for(const [label,fn] of actions){let b=document.createElement('button');b.className='sheetAction';b.textContent=label;b.onclick=()=>{$('sheet').classList.add('hidden');fn()};root.append(b)}$('sheet').classList.remove('hidden')}
-$('sheetClose').onclick=()=>$('sheet').classList.add('hidden');$('settings').onclick=()=>sheet('О приложении',[['Версия 2.0 · Все сканы обрабатываются локально',()=>{}],['Сохраняйте резервные копии PDF в «Файлы»',()=>{}]]);
-$('newFolder').onclick=async()=>{let name=prompt('Название папки');if(!name?.trim())return;let f={id:crypto.randomUUID(),name:name.trim()};await put('folders',f);folder=f.id;await refresh()};
-$('search').oninput=renderLibrary;
-function docMenu(d){sheet(d.name,[['Открыть / поделиться PDF',()=>exportDoc(d)],['Переименовать',async()=>{let n=prompt('Новое название',d.name);if(n?.trim()){d.name=n.trim();await put('docs',d);refresh()}}],['Переместить в папку',()=>sheet('Выберите папку',[['Без папки',async()=>{d.folder='';await put('docs',d);refresh()}],...folders.map(f=>[f.name,async()=>{d.folder=f.id;await put('docs',d);refresh()}])])],['Удалить документ',async()=>{if(confirm('Удалить PDF из библиотеки?')){await del('docs',d.id);refresh()}}]])}
-async function exportDoc(d){const file=new File([d.blob],d.name+'.pdf',{type:'application/pdf'});try{if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:d.name});return}}catch(e){if(e.name==='AbortError')return}let u=URL.createObjectURL(d.blob);let a=document.createElement('a');a.href=u;a.download=d.name+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(u),60000)}
-function newBatch(){pages=[];$('filename').value='Скан '+new Date().toLocaleDateString('ru-RU');renderBatch();show('batchView')}
-$('navScan').onclick=()=>{newBatch();$('cameraInput').click()};$('navImport').onclick=()=>{newBatch();$('photoInput').click()};$('navDocs').onclick=()=>show('libraryView');$('backLibrary').onclick=()=>show('libraryView');$('addCamera').onclick=()=>$('cameraInput').click();$('addPhotos').onclick=()=>$('photoInput').click();
-$('cameraInput').onchange=e=>loadFiles(e.target);$('photoInput').onchange=e=>loadFiles(e.target);
-async function loadFiles(input){let files=[...input.files];input.value='';if(!files.length)return;show('batchView');for(const file of files){if(!file.type.startsWith('image/'))continue;try{let bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});let k=Math.min(1,MAX/Math.max(bitmap.width,bitmap.height)),c=cv(Math.round(bitmap.width*k),Math.round(bitmap.height*k));c.getContext('2d').drawImage(bitmap,0,0,c.width,c.height);bitmap.close();pages.push(c)}catch(e){alert('Не удалось открыть фотографию: '+e.message)}}renderBatch();if(files.length===1&&pages.length)edit(pages.length-1)}
-function renderBatch(){let root=$('batchPages');root.replaceChildren();$('batchEmpty').classList.toggle('hidden',pages.length>0);$('saveDocument').disabled=!pages.length;pages.forEach((c,i)=>{let div=document.createElement('div');div.className='tile';let img=new Image();img.src=c.toDataURL('image/jpeg',.65);let bottom=document.createElement('div');bottom.className='tileBottom';let label=document.createElement('span');label.textContent=`Стр. ${i+1}`;let editBtn=document.createElement('button');editBtn.textContent='✎';editBtn.onclick=()=>edit(i);let more=document.createElement('button');more.textContent='⋯';more.onclick=()=>sheet('Страница '+(i+1),[['Редактировать',()=>edit(i)],['Переместить раньше',()=>move(i,-1)],['Переместить позже',()=>move(i,1)],['Удалить',()=>{pages.splice(i,1);renderBatch()}]]);bottom.append(label,editBtn,more);div.append(img,bottom);root.append(div)})}
-function move(i,d){let j=i+d;if(j<0||j>=pages.length)return;[pages[i],pages[j]]=[pages[j],pages[i]];renderBatch()}
-$('clearBatch').onclick=()=>{if(confirm('Очистить все страницы?')){pages=[];renderBatch()}};
-$('saveDocument').onclick=async()=>{try{let name=$('filename').value.trim()||'Скан документа',blob=pdfBlob(pages);let d={id:crypto.randomUUID(),name,blob,folder:folder==='all'?'':folder,count:pages.length,created:Date.now()};await put('docs',d);await refresh();show('libraryView');sheet('PDF сохранён',[['Открыть / поделиться',()=>exportDoc(d)],['Готово',()=>{}]])}catch(e){alert('Не удалось сохранить PDF: '+e.message+'\nПопробуйте уменьшить количество страниц.')}};
-function edit(i){editing=i;original=clone(pages[i]);source=clone(original);filter='original';document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('selected',b.dataset.filter==='original'));show('editorView');drawPreview();detectCorners()}
-function drawPreview(){let c=$('cropCanvas');c.width=source.width;c.height=source.height;c.getContext('2d').drawImage(source,0,0);renderCorners()}
-function renderCorners(){let box=$('cropBox'),wrap=$('cropHandles');wrap.replaceChildren();let pts=corners.map(p=>[p[0]*1000,p[1]*1000]);$('cropPolygon').setAttribute('points',pts.map(p=>p.join(',')).join(' '));corners.forEach((p,i)=>{let h=document.createElement('div');h.className='handle';h.style.left=p[0]*100+'%';h.style.top=p[1]*100+'%';h.onpointerdown=e=>{e.preventDefault();dragging=i;h.setPointerCapture(e.pointerId);updatePoint(e,i)};h.onpointermove=e=>{if(dragging===i)updatePoint(e,i)};h.onpointerup=h.onpointercancel=()=>{dragging=-1;$('magnifier').classList.add('hidden')};wrap.append(h)})}
-function updatePoint(e,i){let r=$('cropBox').getBoundingClientRect();corners[i]=[clamp((e.clientX-r.left)/r.width),clamp((e.clientY-r.top)/r.height)];let h=$('cropHandles').children[i];h.style.left=corners[i][0]*100+'%';h.style.top=corners[i][1]*100+'%';$('cropPolygon').setAttribute('points',corners.map(p=>`${p[0]*1000},${p[1]*1000}`).join(' '));drawMagnifier(i)}
-function drawMagnifier(i){let p=corners[i],m=$('magnifier'),box=$('cropBox');m.classList.remove('hidden');let x=p[0]*box.clientWidth,y=p[1]*box.clientHeight;m.style.left=Math.max(3,Math.min(box.clientWidth-164,x-82))+'px';m.style.top=(y<195?Math.min(box.clientHeight-165,y+45):Math.max(2,y-195))+'px';let c=$('magCanvas'),ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,156,156);let z=65,sx=p[0]*source.width,sy=p[1]*source.height;ctx.imageSmoothingEnabled=true;ctx.drawImage(source,sx-z/2,sy-z/2,z,z,0,0,156,156);ctx.strokeStyle='#3478f6';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(78,0);ctx.lineTo(78,156);ctx.moveTo(0,78);ctx.lineTo(156,78);ctx.stroke()}
-// Detect a paper rectangle from contrast against its surroundings. Reject weak/ambiguous candidates.
-function detectCorners(){let tmp=cv(320,Math.max(120,Math.round(320*source.height/source.width)));let w=tmp.width,h=tmp.height;tmp.getContext('2d',{willReadFrequently:true}).drawImage(source,0,0,w,h);let d=tmp.getContext('2d').getImageData(0,0,w,h).data;let lum=new Float32Array(w*h);for(let i=0;i<lum.length;i++)lum[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];let border=[];for(let x=0;x<w;x+=5){border.push(lum[x],lum[(h-1)*w+x])}for(let y=0;y<h;y+=5){border.push(lum[y*w],lum[y*w+w-1])}border.sort((a,b)=>a-b);let bg=border[Math.floor(border.length/2)];let mask=new Uint8Array(w*h);let count=0;for(let i=0;i<mask.length;i++){mask[i]=Math.abs(lum[i]-bg)>32?1:0;count+=mask[i]};let ratio=count/mask.length;let found=null;
-// Sample the outer edge of a light sheet on a darker surface, or a darker sheet on light surface.
-for(const sign of [1,-1]){let pts=[];for(let y=Math.round(h*.10);y<h*.90;y+=Math.max(2,Math.round(h/32))){let run=[];for(let x=0;x<w;x++){if((lum[y*w+x]-bg)*sign>24)run.push(x)}if(run.length>w*.25){let lo=run[0],hi=run[run.length-1];if(hi-lo>w*.40&&lo>2&&hi<w-3)pts.push([y,lo,hi])}}if(pts.length>=6){let first=pts.slice(0,Math.max(2,Math.floor(pts.length*.22))),last=pts.slice(-Math.max(2,Math.floor(pts.length*.22)));let avg=(arr,k)=>arr.reduce((s,p)=>s+p[k],0)/arr.length;let top=avg(first,0),bottom=avg(last,0);let quad=[[avg(first,1)/w,top/h],[avg(first,2)/w,top/h],[avg(last,2)/w,bottom/h],[avg(last,1)/w,bottom/h]];let area=(quad[1][0]-quad[0][0])*(quad[2][1]-quad[1][1]);if(area>.15&&bottom-top>h*.35){found=quad;break}}}
-// Fallback uses near-full-frame corners; always allow manual refinement.
-corners=found||[[.04,.04],[.96,.04],[.96,.96],[.04,.96]];$('detectStatus').textContent=found?'Границы найдены предварительно. Проверьте все четыре угла; для точности используйте лупу.':'Не удалось уверенно определить лист. Установите четыре угла вручную с помощью лупы.';renderCorners()}
-$('autoDetect').onclick=detectCorners;$('resetEdit').onclick=()=>{source=clone(original);filter='original';drawPreview();detectCorners()};$('cancelEdit').onclick=()=>{show('batchView');renderBatch()};
-function applyFilter(type){filter=type;source=clone(original);let ctx=source.getContext('2d');if(type!=='original'){let im=ctx.getImageData(0,0,source.width,source.height),d=im.data;for(let i=0;i<d.length;i+=4){let r=d[i],g=d[i+1],b=d[i+2],v=.299*r+.587*g+.114*b;if(type==='gray')r=g=b=v;if(type==='bw'){let val=Math.max(0,Math.min(255,(v-128)*1.45+148));r=g=b=val}if(type==='enhance'){r=(r-128)*1.16+137;g=(g-128)*1.16+137;b=(b-128)*1.16+137}d[i]=r;d[i+1]=g;d[i+2]=b}ctx.putImageData(im,0,0)}drawPreview();document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('selected',b.dataset.filter===type))}
-for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>applyFilter(b.dataset.filter);
-$('rotate').onclick=()=>{let c=cv(original.height,original.width),x=c.getContext('2d');x.translate(c.width,0);x.rotate(Math.PI/2);x.drawImage(original,0,0);original=c;applyFilter(filter);detectCorners()};
-function solve(A,b){const n=b.length;for(let i=0;i<n;i++){let k=i;for(let j=i+1;j<n;j++)if(Math.abs(A[j][i])>Math.abs(A[k][i]))k=j;[A[i],A[k]]=[A[k],A[i]];[b[i],b[k]]=[b[k],b[i]];if(Math.abs(A[i][i])<1e-9)throw Error('Некорректные углы');const t=A[i][i];for(let m=i;m<n;m++)A[i][m]/=t;b[i]/=t;for(let j=0;j<n;j++)if(j!==i){const q=A[j][i];for(let m=i;m<n;m++)A[j][m]-=q*A[i][m];b[j]-=q*b[i]}}return b}
-function homography(dst,src){const A=[],b=[];for(let i=0;i<4;i++){const [x,y]=dst[i],[u,v]=src[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v)}return solve(A,b)}
+(() => {
+const $=id=>document.getElementById(id), Vision=window.ScannerVision, PDF=window.ScannerPDF;
+const MAX=2300,DB_NAME='alfred_scanner_2';
+let db,docs=[],folders=[],selectedFolder='all',draft=null,activeDoc=null,working=null,workingIndex=-1,workingCorners=[],workingFilter='document',draggedCorner=-1,urls=[],currentView='libraryView',toastTimer,cameraStream=null,flashTimer;
+const uid=()=>typeof crypto.randomUUID==='function'?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(36).slice(2);
+function notify(text){const n=$('toast');n.textContent=text;n.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>n.classList.add('hidden'),4000);}
+function changeView(id){currentView=id;for(const v of ['libraryView','batchView','cameraView','editorView','detailView'])$(v).classList.toggle('hidden',v!==id);$('bottomNav').classList.toggle('hidden',id!=='libraryView');window.scrollTo(0,0);}
+function sheet(title,options){$('sheetTitle').textContent=title;const root=$('sheetActions');root.replaceChildren();for(const action of options){let b=document.createElement('button');b.className='sheet-action'+(action.danger?' danger':'');b.textContent=action.label;b.onclick=()=>{closeSheet();Promise.resolve().then(action.run).catch(e=>reportError(e));};root.append(b);}$('sheet').classList.remove('hidden');}
+function closeSheet(){$('sheet').classList.add('hidden');}
+function reportError(err){console.error(err);notify('Ошибка: '+(err?.message||'операция не выполнена'));}
+$('sheetClose').onclick=closeSheet;$('sheet').onclick=e=>{if(e.target===$('sheet'))closeSheet()};
+$('infoButton').onclick=()=>sheet('Альфред Сканер 3.0',[
+ {label:'Документы обрабатываются локально, без сервера',run:()=>{}},
+ {label:'Сканируйте страницы подряд, затем сохраните один PDF',run:()=>{}},
+ {label:'Для резервных копий экспортируйте PDF в «Файлы»',run:()=>{}}
+]);
+function openDB(){return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,2);
+ request.onupgradeneeded=()=>{const d=request.result;for(const name of ['docs','folders','drafts'])if(!d.objectStoreNames.contains(name))d.createObjectStore(name,{keyPath:'id'});};
+ request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+});}
+const transaction=(name,action,record)=>new Promise((resolve,reject)=>{const tx=db.transaction(name,action==='all'?'readonly':'readwrite'),store=tx.objectStore(name);let req=action==='all'?store.getAll():action==='get'?store.get(record):action==='delete'?store.delete(record):store.put(record);
+ req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+const all=name=>transaction(name,'all'),get=(name,id)=>transaction(name,'get',id),save=(name,value)=>transaction(name,'put',value),remove=(name,id)=>transaction(name,'delete',id);
+async function reloadLibrary(){docs=await all('docs');folders=await all('folders');renderLibrary();}
+function clearUrls(){for(const url of urls)URL.revokeObjectURL(url);urls=[];}
+function blobURL(blob){if(!blob)return '';const u=URL.createObjectURL(blob);urls.push(u);return u;}
+function formatDate(t){return new Date(t||Date.now()).toLocaleDateString('ru-RU',{day:'2-digit',month:'short'});}
+function selectGroups(){const el=$('docFolder');el.replaceChildren();for(const f of [{id:'',name:'Без группы'},...folders]){let op=document.createElement('option');op.value=f.id;op.textContent=f.name;el.append(op);}el.value=draft?.folder||'';}
+function renderLibrary(){clearUrls();const bar=$('folderList');bar.replaceChildren();let fcount=0;
+ for(const f of [{id:'all',name:'Все'},...folders]){
+  if(f.id!=='all')fcount++;const b=document.createElement('button');b.className='folder-chip'+(selectedFolder===f.id?' active':'');b.textContent=(f.id==='all'?'▤ ':'▰ ')+f.name;b.onclick=()=>{selectedFolder=f.id;renderLibrary()};bar.append(b);
+  if(f.id!=='all'&&f.id===selectedFolder){const settings=document.createElement('button');settings.className='folder-chip';settings.textContent='•••';settings.title='Управление группой';settings.onclick=()=>folderMenu(f);bar.append(settings);}
+ }
+ $('folderCount').textContent=fcount+' групп';const q=$('searchInput').value.toLowerCase().trim();const items=docs.filter(d=>(selectedFolder==='all'||d.folder===selectedFolder)&&(d.name||'').toLowerCase().includes(q)).sort((a,b)=>(b.updated||b.created)-(a.updated||a.created));
+ $('currentFolderTitle').textContent=selectedFolder==='all'?'Все документы':(folders.find(f=>f.id===selectedFolder)?.name||'Документы');$('documentCount').textContent=items.length+' PDF';
+ $('emptyLibrary').classList.toggle('hidden',!!items.length);const root=$('documentList');root.replaceChildren();
+ for(const d of items){let row=document.createElement('div');row.className='doc-row';let preview;
+  if(d.previewBlob||d.pages?.[0]?.outputBlob){preview=document.createElement('img');preview.className='doc-thumb';preview.src=blobURL(d.previewBlob||d.pages[0].outputBlob);}else{preview=document.createElement('div');preview.className='doc-thumb placeholder';preview.textContent='▤';}
+  const body=document.createElement('div');body.className='doc-copy';const title=document.createElement('b');title.textContent=d.name||'Документ';const sub=document.createElement('small');sub.textContent=`${d.pages?.length||d.count||1} стр. · ${formatDate(d.updated||d.created)}`;body.append(title,sub);row.append(preview,body);
+  const more=document.createElement('button');more.className='dots';more.textContent='⋯';more.onclick=e=>{e.stopPropagation();documentMenu(d)};row.onclick=()=>openDocument(d.id);row.append(more);root.append(row);
+ }
+ $('draftNotice').classList.toggle('hidden',!draft?.pages?.length);if(draft?.pages?.length)$('draftCount').textContent=draft.pages.length+' стр. · '+draft.name;
+}
+async function createFolder(){let name=prompt('Название новой группы');if(!name?.trim())return;name=name.trim();if(folders.some(f=>f.name.toLowerCase()===name.toLowerCase())){notify('Такая группа уже существует');return;}
+ const f={id:uid(),name,created:Date.now()};await save('folders',f);selectedFolder=f.id;await reloadLibrary();notify('Группа создана');}
+$('createFolder').onclick=()=>createFolder().catch(reportError);$('searchInput').oninput=renderLibrary;$('resumeDraft').onclick=()=>{renderBatch();changeView('batchView')};
+function folderMenu(f){sheet(f.name,[
+ {label:'Переименовать группу',run:async()=>{let name=prompt('Новое название',f.name);if(!name?.trim())return;f.name=name.trim();await save('folders',f);reloadLibrary();}},
+ {label:'Удалить группу (документы останутся)',danger:true,run:async()=>{if(!confirm('Удалить группу? Документы останутся в разделе «Все».'))return;for(const d of docs)if(d.folder===f.id){d.folder='';await save('docs',d)};if(draft?.folder===f.id){draft.folder='';await persistDraft()}await remove('folders',f.id);selectedFolder='all';reloadLibrary();}}
+]);}
+function documentMenu(d){sheet(d.name||'Документ',[
+ {label:'Открыть документ',run:()=>openDocument(d.id)},
+ {label:'Поделиться PDF',run:()=>shareDocument(d)},
+ {label:'Переименовать',run:async()=>{let name=prompt('Название документа',d.name);if(!name?.trim())return;d.name=name.trim();await save('docs',d);await reloadLibrary();}},
+ {label:'Переместить в группу',run:()=>sheet('Переместить',[{label:'Без группы',run:()=>moveDoc(d,'')},...folders.map(f=>({label:f.name,run:()=>moveDoc(d,f.id)}))])},
+ {label:'Удалить документ',danger:true,run:async()=>{if(!confirm('Удалить этот документ?'))return;await remove('docs',d.id);await reloadLibrary();notify('Документ удалён');}}
+]);}
+async function moveDoc(d,id){d.folder=id;d.updated=Date.now();await save('docs',d);await reloadLibrary();notify('Документ перемещён');}
+async function shareDocument(d){try{let blob=d.blob;if(!blob&&d.pages?.length)blob=await PDF.generate(d.pages);if(!blob)throw Error('PDF отсутствует');const filename=(d.name||'Документ').replace(/[\\/:*?"<>|]/g,'_')+'.pdf';const file=new File([blob],filename,{type:'application/pdf'});
+ if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:d.name});return;}catch(e){if(e.name==='AbortError')return;}}
+ const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);
+}catch(e){reportError(e)}}
+function beginDraft(existing=null){draft={id:'active',name:existing?.name||'Скан '+new Date().toLocaleDateString('ru-RU'),folder:existing?.folder||(selectedFolder==='all'?'':selectedFolder),docId:existing?.id||null,pages:existing?.pages?existing.pages.slice():[],created:Date.now()};persistDraft().catch(reportError);renderBatch();changeView('batchView');}
+function startDraft(withCamera=false,withGallery=false){if(draft?.pages?.length){sheet('Есть незаконченный документ',[
+ {label:'Продолжить сканирование',run:()=>{renderBatch();changeView('batchView');if(withCamera)openCamera();else if(withGallery)openGallery();}},
+ {label:'Создать новый документ',run:()=>{beginDraft();if(withCamera)openCamera();else if(withGallery)openGallery();}}
+]);return;}
+ beginDraft();if(withCamera)openCamera();else if(withGallery)openGallery();}
+$('navCapture').onclick=()=>startDraft(true);$('navPhotos').onclick=()=>startDraft(false,true);$('navDocuments').onclick=()=>changeView('libraryView');
+function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}$('liveVideo').srcObject=null;}
+function cameraCounter(){$('liveCounter').textContent=(draft?.pages.length||0)+' стр.';}
+async function openCamera(){if(!navigator.mediaDevices?.getUserMedia){$('cameraInput').click();return;}
+ try{
+  if(!draft)beginDraft();changeView('cameraView');cameraCounter();$('cameraError').classList.add('hidden');$('liveShutter').disabled=true;
+  cameraStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:2560}}});
+  const video=$('liveVideo');video.srcObject=cameraStream;await video.play();$('liveShutter').disabled=false;
+ }catch(e){stopCamera();$('cameraError').classList.remove('hidden');$('liveShutter').disabled=true;notify('Камера недоступна: выберите системную камеру');}
+}
+function openGallery(){$('galleryInput').click()};
+$('cameraBack').onclick=()=>{stopCamera();renderBatch();changeView('batchView');};
+$('cameraDone').onclick=()=>{stopCamera();renderBatch();changeView('batchView');};
+$('nativeCamera').onclick=()=>{$('cameraInput').click();};
+$('liveShutter').onclick=async()=>{
+ const video=$('liveVideo');if(!video.videoWidth||!video.videoHeight||!draft)return;const b=$('liveShutter');b.disabled=true;
+ try{const k=Math.min(1,MAX/Math.max(video.videoWidth,video.videoHeight)),c=Vision.canvas(Math.round(video.videoWidth*k),Math.round(video.videoHeight*k));
+  c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+  const p=await processPhoto(await toJPEG(c,.94));draft.pages.push(p);await persistDraft();cameraCounter();
+  $('captureFlash').classList.remove('hidden');clearTimeout(flashTimer);flashTimer=setTimeout(()=>$('captureFlash').classList.add('hidden'),700);
+  if(p.needsReview)$('cameraInstructions').textContent='Последний лист нужно будет уточнить в редакторе. Можно продолжать съёмку.';
+ }catch(e){reportError(e)}finally{b.disabled=false;}
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&cameraStream)stopCamera();});
+window.addEventListener('pagehide',stopCamera);
 
-function bytes(s){return new TextEncoder().encode(s)}function concat(arr){let n=0;for(const a of arr)n+=a.length;const r=new Uint8Array(n);let p=0;for(const a of arr){r.set(a,p);p+=a.length}return r}function pdfBlob(canvases){const objects=[null],add=x=>(objects.push(x),objects.length-1);const catalog=add(null),tree=add(null),pageRefs=[];for(const canvas of canvases){const url=canvas.toDataURL('image/jpeg',.86),binary=atob(url.split(',')[1]),jpg=Uint8Array.from(binary,c=>c.charCodeAt(0));const img=add({dict:`/Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,data:jpg});const a4w=595.28,a4h=841.89;const fit=Math.min(a4w/canvas.width,a4h/canvas.height),dw=canvas.width*fit,dh=canvas.height*fit,x=(a4w-dw)/2,y=(a4h-dh)/2;const cmd=bytes(`q ${dw.toFixed(2)} 0 0 ${dh.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im0 Do Q\n`),content=add({dict:'',data:cmd});pageRefs.push(add(`<< /Type /Page /Parent ${tree} 0 R /MediaBox [0 0 ${a4w} ${a4h}] /Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${content} 0 R >>`))}objects[catalog]=`<< /Type /Catalog /Pages ${tree} 0 R >>`;objects[tree]=`<< /Type /Pages /Kids [${pageRefs.map(n=>n+' 0 R').join(' ')}] /Count ${pageRefs.length} >>`;const chunks=[bytes('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')],offsets=[0];let size=chunks[0].length;for(let i=1;i<objects.length;i++){offsets.push(size);const o=objects[i];let part;if(typeof o==='string')part=bytes(`${i} 0 obj\n${o}\nendobj\n`);else part=concat([bytes(`${i} 0 obj\n<< ${o.dict} /Length ${o.data.length} >>\nstream\n`),o.data,bytes('\nendstream\nendobj\n')]);chunks.push(part);size+=part.length}const start=size;let xref=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;for(let i=1;i<objects.length;i++)xref+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';chunks.push(bytes(xref+`trailer\n<< /Size ${objects.length} /Root ${catalog} 0 R >>\nstartxref\n${start}\n%%EOF`));return new Blob(chunks,{type:'application/pdf'})}
-$('applyEdit').onclick=()=>{try{let pts=corners.map(([x,y])=>[x*(source.width-1),y*(source.height-1)]),dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);let w=Math.round(Math.max(dist(pts[0],pts[1]),dist(pts[3],pts[2]))),h=Math.round(Math.max(dist(pts[0],pts[3]),dist(pts[1],pts[2])));if(w<50||h<50)throw Error('Слишком маленькая область');let k=Math.min(1,MAX/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);let H=homography([[0,0],[w-1,0],[w-1,h-1],[0,h-1]],pts),s=source.getContext('2d').getImageData(0,0,source.width,source.height),out=cv(w,h),ctx=out.getContext('2d'),d=ctx.createImageData(w,h),sw=source.width,sh=source.height;for(let y=0;y<h;y++)for(let x=0;x<w;x++){let den=H[6]*x+H[7]*y+1,sx=(H[0]*x+H[1]*y+H[2])/den,sy=(H[3]*x+H[4]*y+H[5])/den,di=(y*w+x)*4;if(sx<0||sy<0||sx>=sw-1||sy>=sh-1){d.data[di]=d.data[di+1]=d.data[di+2]=255;d.data[di+3]=255;continue}let ix=Math.floor(sx),iy=Math.floor(sy),fx=sx-ix,fy=sy-iy;for(let z=0;z<3;z++){let a=(iy*sw+ix)*4+z,b=a+4,c=a+sw*4,e=c+4;d.data[di+z]=s.data[a]*(1-fx)*(1-fy)+s.data[b]*fx*(1-fy)+s.data[c]*(1-fx)*fy+s.data[e]*fx*fy}d.data[di+3]=255}ctx.putImageData(d,0,0);pages[editing]=out;show('batchView');renderBatch()}catch(e){alert('Ошибка выравнивания: '+e.message)}};
-(async()=>{try{db=await openDB();await refresh()}catch(e){alert('Не удалось открыть локальную библиотеку: '+e.message)}})();
-if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+$('batchCamera').onclick=openCamera;$('batchGallery').onclick=openGallery;$('cameraInput').onchange=e=>readInput(e.currentTarget);$('galleryInput').onchange=e=>readInput(e.currentTarget);
+async function imageToCanvas(blob){const url=URL.createObjectURL(blob);try{
+ let img;try{img=await createImageBitmap(blob);}catch(e){img=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Этот формат изображения не поддерживается браузером'));im.src=url;});}
+ const s=Math.min(1,MAX/Math.max(img.width,img.height)),out=Vision.canvas(Math.max(1,Math.round(img.width*s)),Math.max(1,Math.round(img.height*s)));out.getContext('2d').drawImage(img,0,0,out.width,out.height);if(img.close)img.close();return out;
+ }finally{URL.revokeObjectURL(url);}}
+const toJPEG=(c,quality=.9)=>new Promise((resolve,reject)=>c.toBlob(blob=>blob?resolve(blob):reject(Error('Не удалось сохранить изображение')),'image/jpeg',quality));
+async function processPhoto(file){let image=await imageToCanvas(file),result=Vision.detect(image),originalBlob=await toJPEG(image,.93),out=result.found?Vision.warp(image,result.corners):image;
+ Vision.filterImage(out,'document');const outputBlob=await toJPEG(out,.90);
+ return {id:uid(),originalBlob,outputBlob,width:out.width,height:out.height,corners:result.found?result.corners:null,filter:'document',confidence:result.confidence,needsReview:!result.found};}
+async function readInput(input){const files=[...input.files];input.value='';if(!files.length)return;if(!draft)beginDraft();stopCamera();changeView('batchView');$('batchHint').textContent='Обрабатываю снимки на iPhone…';
+ try{for(const f of files){if(!f.type.startsWith('image/')&&!/\.(heic|heif|jpg|jpeg|png|webp)$/i.test(f.name))continue;const p=await processPhoto(f);draft.pages.push(p);await persistDraft();renderBatch();}
+  const weak=draft.pages.filter(p=>p.needsReview).length;
+  if(weak)notify('Проверьте границы: '+weak+' стр. требуют уточнения');else notify('Страницы добавлены. Можно снимать дальше.');
+ }catch(e){reportError(e)}finally{renderBatch();}
+}
+async function persistDraft(){if(!db||!draft)return;await save('drafts',draft);}
+function renderBatch(){if(!draft)return;clearUrls();$('docName').value=draft.name;$('batchCounter').textContent=draft.pages.length+' стр.';$('emptyBatch').classList.toggle('hidden',!!draft.pages.length);$('finishDocument').disabled=!draft.pages.length;
+ selectGroups();const weak=draft.pages.filter(p=>p.needsReview).length;$('batchHint').textContent=weak?`Проверьте углы на ${weak} стр. Снимайте следующие страницы, не сохраняя PDF до завершения.`:'Снимайте страницы подряд. Один документ — один PDF. На миниатюру можно нажать для правки.';
+ const grid=$('pageGrid');grid.replaceChildren();draft.pages.forEach((p,i)=>{
+  const tile=document.createElement('div');tile.className='page-tile';const img=document.createElement('img');img.src=blobURL(p.outputBlob);img.alt='Страница '+(i+1);img.onclick=()=>editPage(i);
+  const badge=document.createElement('span');badge.className='status-pill'+(p.needsReview?' warning':'');badge.textContent=p.needsReview?'Проверить углы':'Авто ✓';
+  const row=document.createElement('div');row.className='tile-info';const label=document.createElement('span');label.textContent='Страница '+(i+1);
+  const edit=document.createElement('button');edit.textContent='Править';edit.onclick=()=>editPage(i);
+  const more=document.createElement('button');more.textContent='⋯';more.onclick=()=>pageMenu(i);
+  row.append(label,edit,more);tile.append(img,badge,row);grid.append(tile);
+ });
+}
+$('docName').oninput=()=>{if(draft){draft.name=$('docName').value;persistDraft().catch(reportError);}};$('docFolder').onchange=()=>{if(draft){draft.folder=$('docFolder').value;persistDraft().catch(reportError);}};
+function pageMenu(i){sheet('Страница '+(i+1),[
+ {label:'Настроить границы и фильтр',run:()=>editPage(i)},
+ {label:'Переместить выше',run:()=>movePage(i,-1)},
+ {label:'Переместить ниже',run:()=>movePage(i,1)},
+ {label:'Удалить страницу',danger:true,run:async()=>{draft.pages.splice(i,1);await persistDraft();renderBatch();}}
+]);}
+async function movePage(i,d){const j=i+d;if(j<0||j>=draft.pages.length)return;[draft.pages[i],draft.pages[j]]=[draft.pages[j],draft.pages[i]];await persistDraft();renderBatch();}
+$('batchBack').onclick=async()=>{if(draft){draft.name=$('docName').value.trim()||draft.name;draft.folder=$('docFolder').value;await persistDraft()}await reloadLibrary();changeView('libraryView')};
+$('discardDraft').onclick=async()=>{if(!confirm('Удалить черновик со всеми страницами?'))return;draft=null;await remove('drafts','active');await reloadLibrary();changeView('libraryView')};
+$('finishDocument').onclick=async()=>{if(!draft?.pages.length)return;const b=$('finishDocument');b.disabled=true;b.textContent='Создаю PDF…';
+ try{draft.name=$('docName').value.trim()||'Скан документа';draft.folder=$('docFolder').value;
+  const blob=await PDF.generate(draft.pages);let d=draft.docId?docs.find(x=>x.id===draft.docId):null;
+  d={...(d||{}),id:draft.docId||uid(),name:draft.name,folder:draft.folder,pages:draft.pages,count:draft.pages.length,blob,previewBlob:draft.pages[0]?.outputBlob,created:d?.created||Date.now(),updated:Date.now()};
+  await save('docs',d);await remove('drafts','active');draft=null;await reloadLibrary();openDocument(d.id);notify('PDF сохранён в библиотеке');
+ }catch(e){reportError(e)}finally{b.textContent='Готово · Сохранить PDF';b.disabled=!draft?.pages?.length;}
+};
+async function openDocument(id){activeDoc=docs.find(d=>d.id===id);if(!activeDoc)return;clearUrls();$('detailTitle').textContent=activeDoc.name;$('detailMeta').textContent=formatDate(activeDoc.updated||activeDoc.created)+' · '+(activeDoc.pages?.length||activeDoc.count||1)+' стр.';
+ $('detailCount').textContent=(activeDoc.pages?.length||activeDoc.count||1)+' стр.';const root=$('detailPages');root.replaceChildren();
+ if(activeDoc.pages?.length){activeDoc.pages.forEach((p,i)=>{const tile=document.createElement('div');tile.className='page-tile';const img=document.createElement('img');img.src=blobURL(p.outputBlob);const b=document.createElement('div');b.className='tile-info';b.textContent='Страница '+(i+1);tile.append(img,b);root.append(tile);});$('addToSaved').disabled=false;}
+ else{$('addToSaved').disabled=true;const info=document.createElement('div');info.className='tip';info.textContent='Документ создан в предыдущей версии. Его можно открыть и экспортировать, но добавление страниц в него недоступно.';root.append(info)}
+ changeView('detailView');}
+$('detailBack').onclick=()=>{reloadLibrary().catch(reportError);changeView('libraryView')};
+$('exportSaved').onclick=()=>activeDoc&&shareDocument(activeDoc);
+$('addToSaved').onclick=()=>{if(!activeDoc?.pages)return;draft={id:'active',name:activeDoc.name,folder:activeDoc.folder||'',docId:activeDoc.id,pages:activeDoc.pages.slice(),created:Date.now()};persistDraft().catch(reportError);renderBatch();changeView('batchView');};
+$('detailMenu').onclick=()=>activeDoc&&documentMenu(activeDoc);
+// Редактор точек — изображение и увеличительная лупа остаются на устройстве.
+async function editPage(i){if(!draft||!draft.pages[i])return;workingIndex=i;working=await imageToCanvas(draft.pages[i].originalBlob);workingFilter=draft.pages[i].filter||'document';
+ const found=Vision.detect(working);workingCorners=draft.pages[i].corners||found.corners||[[.035,.035],[.965,.035],[.965,.965],[.035,.965]];
+ changeView('editorView');drawEditor();setDetectStatus(!!draft.pages[i].corners||found.found);selectFilter(workingFilter);}
+function setDetectStatus(success){$('detectStatus').textContent=success?'Границы найдены. При необходимости уточните точки — при перемещении появляется лупа.':'Автоматика не уверена в границах. Расставьте четыре точки по углам листа с помощью лупы.';}
+function drawEditor(){const availableH=Math.min(window.innerHeight*.53,580),availableW=Math.min(window.innerWidth-34,666),width=Math.min(availableW,availableH*working.width/working.height);
+ const box=$('cropBox');box.style.width=Math.max(90,width)+'px';const c=$('sourceCanvas');c.width=working.width;c.height=working.height;c.getContext('2d').drawImage(working,0,0);renderCorners();}
+function renderCorners(){const root=$('handles');root.replaceChildren();$('cropPolygon').setAttribute('points',workingCorners.map(p=>(p[0]*1000)+','+(p[1]*1000)).join(' '));
+ workingCorners.forEach((p,i)=>{const b=document.createElement('div');b.className='corner';b.setAttribute('role','slider');b.setAttribute('aria-label','Угол '+(i+1));b.style.left=p[0]*100+'%';b.style.top=p[1]*100+'%';b.onpointerdown=e=>{e.preventDefault();draggedCorner=i;b.setPointerCapture(e.pointerId);updateCorner(e,i);};b.onpointermove=e=>{if(draggedCorner===i)updateCorner(e,i)};b.onpointerup=b.onpointercancel=()=>{draggedCorner=-1;$('lens').classList.add('hidden');};root.append(b);});}
+function updateCorner(e,i){const box=$('cropBox'),r=box.getBoundingClientRect(),x=Vision.clamp((e.clientX-r.left)/r.width),y=Vision.clamp((e.clientY-r.top)/r.height);
+ workingCorners[i]=[x,y];const node=$('handles').children[i];node.style.left=x*100+'%';node.style.top=y*100+'%';$('cropPolygon').setAttribute('points',workingCorners.map(p=>p[0]*1000+','+p[1]*1000).join(' '));drawLens(i);}
+function drawLens(i){let p=workingCorners[i],box=$('cropBox'),lens=$('lens'),x=p[0]*box.clientWidth,y=p[1]*box.clientHeight;
+ lens.classList.remove('hidden');let left=Math.max(0,Math.min(box.clientWidth-178,x-89));let top=y<210?Math.min(box.clientHeight-178,y+42):y-199;
+ lens.style.left=left+'px';lens.style.top=Math.max(0,top)+'px';const ctx=$('lensCanvas').getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,170,170);ctx.imageSmoothingEnabled=true;const z=Math.max(60,Math.min(145,working.width*.055)),sx=p[0]*working.width,sy=p[1]*working.height;
+ ctx.drawImage(working,sx-z/2,sy-z/2,z,z,0,0,170,170);ctx.strokeStyle='#3478f6';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(85,0);ctx.lineTo(85,170);ctx.moveTo(0,85);ctx.lineTo(170,85);ctx.stroke();}
+$('redetect').onclick=()=>{const r=Vision.detect(working);if(r.found)workingCorners=r.corners;else workingCorners=[[.035,.035],[.965,.035],[.965,.965],[.035,.965]];setDetectStatus(r.found);renderCorners()};
+$('rotateImage').onclick=()=>{const rotated=Vision.canvas(working.height,working.width),ctx=rotated.getContext('2d');ctx.translate(rotated.width,0);ctx.rotate(Math.PI/2);ctx.drawImage(working,0,0);working=rotated;const r=Vision.detect(working);workingCorners=r.corners||[[.035,.035],[.965,.035],[.965,.965],[.035,.965]];setDetectStatus(r.found);drawEditor()};
+$('resetImage').onclick=async()=>{working=await imageToCanvas(draft.pages[workingIndex].originalBlob);const r=Vision.detect(working);workingCorners=r.corners||[[.035,.035],[.965,.035],[.965,.965],[.035,.965]];workingFilter='document';selectFilter(workingFilter);setDetectStatus(r.found);drawEditor()};
+$('editBack').onclick=()=>{changeView('batchView');renderBatch()};
+function selectFilter(type){workingFilter=type;for(const b of $('filterList').querySelectorAll('button'))b.classList.toggle('selected',b.dataset.filter===type);}
+for(const b of $('filterList').querySelectorAll('button'))b.onclick=()=>selectFilter(b.dataset.filter);
+async function applyEditor(takeNext=false){try{
+ const quad=workingCorners,area=Math.abs(quad.reduce((s,p,i)=>s+p[0]*quad[(i+1)%4][1]-p[1]*quad[(i+1)%4][0],0))/2;
+ if(area<.02)throw Error('Точки образуют слишком маленькую область');
+ let out=Vision.warp(working,quad);Vision.filterImage(out,workingFilter);
+ const p=draft.pages[workingIndex];p.originalBlob=await toJPEG(working,.93);p.outputBlob=await toJPEG(out,.9);p.width=out.width;p.height=out.height;p.corners=workingCorners.map(x=>x.slice());p.filter=workingFilter;p.needsReview=false;p.confidence=1;
+ await persistDraft();changeView('batchView');renderBatch();if(takeNext)openCamera();else notify('Границы страницы сохранены');
+ }catch(e){reportError(e)}}
+$('applyCrop').onclick=()=>applyEditor(false);$('applyAndCamera').onclick=()=>applyEditor(true);
+async function init(){try{db=await openDB();draft=await get('drafts','active')||null;docs=await all('docs');folders=await all('folders');renderLibrary();}catch(e){reportError(e)}}
+init();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js?v=3').catch(()=>{});
+window.addEventListener('error',e=>console.error('Ошибка интерфейса:',e.message));
+})();
